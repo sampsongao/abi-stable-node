@@ -38,6 +38,7 @@ set build_release=
 set enable_vtune_arg=
 set configure_flags=
 set build_addons=
+set build_addons_abi=
 set dll=
 
 :next-arg
@@ -57,9 +58,10 @@ if /i "%1"=="nosnapshot"    set nosnapshot=1&goto arg-ok
 if /i "%1"=="noetw"         set noetw=1&goto arg-ok
 if /i "%1"=="noperfctr"     set noperfctr=1&goto arg-ok
 if /i "%1"=="licensertf"    set licensertf=1&goto arg-ok
-if /i "%1"=="test"          set test_args=%test_args% addons doctool known_issues message parallel sequential -J&set jslint=1&set build_addons=1&goto arg-ok
-if /i "%1"=="test-ci"       set test_args=%test_args% %test_ci_args% -p tap --logfile test.tap addons doctool inspector known_issues message sequential parallel&set cctest_args=%cctest_args% --gtest_output=tap:cctest.tap&set build_addons=1&goto arg-ok
+if /i "%1"=="test"          set test_args=%test_args% addons addons-abi doctool known_issues message parallel sequential -J&set jslint=1&set build_addons=1&build_addons_abi=1&goto arg-ok
+if /i "%1"=="test-ci"       set test_args=%test_args% %test_ci_args% -p tap --logfile test.tap addons addons-abi doctool inspector known_issues message sequential parallel&set cctest_args=%cctest_args% --gtest_output=tap:cctest.tap&set build_addons=1&build_addons_abi=1&goto arg-ok
 if /i "%1"=="test-addons"   set test_args=%test_args% addons&set build_addons=1&goto arg-ok
+if /i "%1"=="test-addons-abi" set test_args=%test_args% addons-abi&set build_addons_abi=1&goto arg-ok
 if /i "%1"=="test-simple"   set test_args=%test_args% sequential parallel -J&goto arg-ok
 if /i "%1"=="test-message"  set test_args=%test_args% message&goto arg-ok
 if /i "%1"=="test-gc"       set test_args=%test_args% gc&set buildnodeweak=1&goto arg-ok
@@ -314,6 +316,16 @@ if not exist "%node_exe%" (
   goto run-tests
 )
 echo Building add-ons
+
+:build-addons-abi
+if not defined build_addons_abi goto run-tests
+if not exist "%node_exe%" (
+  echo Failed to find node.exe
+  goto run-tests
+)
+echo Building add-ons
+
+
 :: clear
 for /d %%F in (test\addons\??_*) do (
   rd /s /q %%F
@@ -330,6 +342,24 @@ for /d %%F in (test\addons\*) do (
   if !errorlevel! neq 0 exit /b !errorlevel!
 )
 EndLocal
+
+:: clear
+for /d %%F in (test\addons-abi\??_*) do (
+  rd /s /q %%F
+)
+:: generate
+"%node_exe%" tools\doc\addon-verify.js
+if %errorlevel% neq 0 exit /b %errorlevel%
+:: building addons-abi
+SetLocal EnableDelayedExpansion
+for /d %%F in (test\addons-abi\*) do (
+  "%node_exe%" deps\npm\node_modules\node-gyp\bin\node-gyp rebuild ^
+    --directory="%%F" ^
+    --nodedir="%cd%"
+  if !errorlevel! neq 0 exit /b !errorlevel!
+)
+EndLocal
+
 goto run-tests
 
 :run-tests

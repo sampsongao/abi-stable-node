@@ -122,9 +122,10 @@ v8:
 
 test: all
 	$(MAKE) build-addons
+	$(MAKE) build-addons-abi
 	$(MAKE) cctest
 	$(PYTHON) tools/test.py --mode=release -J \
-		addons doctool inspector known_issues message pseudo-tty parallel sequential
+		addons addons-abi doctool inspector known_issues message pseudo-tty parallel sequential
 	$(MAKE) lint
 
 test-parallel: all
@@ -188,10 +189,37 @@ test/addons/.buildstamp: config.gypi \
 # TODO(bnoordhuis) Force rebuild after gyp update.
 build-addons: $(NODE_EXE) test/addons/.buildstamp
 
+ADDONS_ABI_BINDING_GYPS := \
+	$(filter-out test/addons-abi/??_*/binding.gyp, \
+		$(wildcard test/addons-abi/*/binding.gyp))
+
+# Implicitly depends on $(NODE_EXE), see the build-addons-abi rule for rationale.
+test/addons-abi/.buildstamp: $(ADDONS_ABI_BINDING_GYPS) \
+	deps/uv/include/*.h deps/v8/include/*.h \
+	src/node.h src/node_buffer.h src/node_object_wrap.h
+	# Cannot use $(wildcard test/addons-abi/*/) here, it's evaluated before
+	# embedded addons have been generated from the documentation.
+	for dirname in test/addons-abi/*/; do \
+		$(NODE) deps/npm/node_modules/node-gyp/bin/node-gyp rebuild \
+			--python="$(PYTHON)" \
+			--directory="$$PWD/$$dirname" \
+			--nodedir="$$PWD" || exit 1 ; \
+	done
+	touch $@
+
+# .buildstamp and .docbuildstamp need $(NODE_EXE) but cannot depend on it
+# directly because it calls make recursively.  The parent make cannot know
+# if the subprocess touched anything so it pessimistically assumes that
+# .buildstamp and .docbuildstamp are out of date and need a rebuild.
+# Just goes to show that recursive make really is harmful...
+# TODO(bnoordhuis) Force rebuild after gyp or node-gyp update.
+build-addons-abi: $(NODE_EXE) test/addons-abi/.buildstamp
+
+
 test-gc: all test/gc/node_modules/weak/build/Release/weakref.node
 	$(PYTHON) tools/test.py --mode=release gc
 
-test-build: | all build-addons
+test-build: | all build-addons build-addons-abi
 
 test-all: test-build test/gc/node_modules/weak/build/Release/weakref.node
 	$(PYTHON) tools/test.py --mode=debug,release
@@ -216,7 +244,7 @@ test-ci-js:
 		$(TEST_CI_ARGS) $(CI_JS_SUITES)
 
 test-ci: LOGLEVEL := info
-test-ci: | build-addons
+test-ci: | build-addons build-addons-abi
 	out/Release/cctest --gtest_output=tap:cctest.tap
 	$(PYTHON) tools/test.py $(PARALLEL_ARGS) -p tap --logfile test.tap \
 		--mode=release --flaky-tests=$(FLAKY_TESTS) \
@@ -260,6 +288,9 @@ test-npm-publish: $(NODE_EXE)
 
 test-addons: test-build
 	$(PYTHON) tools/test.py --mode=release addons
+
+test-addons-abi: test-build
+	$(PYTHON) tools/test.py --mode=release addons-abi
 
 test-timers:
 	$(MAKE) --directory=tools faketime
@@ -713,6 +744,7 @@ CPPLINT_EXCLUDE += src/node_root_certs.h
 CPPLINT_EXCLUDE += src/queue.h
 CPPLINT_EXCLUDE += src/tree.h
 CPPLINT_EXCLUDE += $(wildcard test/addons/??_*/*.cc test/addons/??_*/*.h)
+CPPLINT_EXCLUDE += $(wildcard test/addons-abi/??_*/*.cc test/addons-abi/??_*/*.h)
 
 CPPLINT_FILES = $(filter-out $(CPPLINT_EXCLUDE), $(wildcard \
 	src/*.c \
@@ -720,6 +752,8 @@ CPPLINT_FILES = $(filter-out $(CPPLINT_EXCLUDE), $(wildcard \
 	src/*.h \
 	test/addons/*/*.cc \
 	test/addons/*/*.h \
+	test/addons-abi/*/*.cc \
+	test/addons-abi/*/*.h \
 	test/cctest/*.cc \
 	test/cctest/*.h \
 	tools/icu/*.cc \
@@ -753,7 +787,8 @@ endif
 
 .PHONY: lint cpplint jslint bench clean docopen docclean doc dist distclean \
 	check uninstall install install-includes install-bin all staticlib \
-	dynamiclib test test-all test-addons build-addons website-upload pkg \
+	dynamiclib test test-all test-addons build-addons \
+        test-addons-abi build-addons-abi website-upload pkg \
 	blog blogclean tar binary release-only bench-http-simple bench-idle \
 	bench-all bench bench-misc bench-array bench-buffer bench-net \
 	bench-http bench-fs bench-tls cctest run-ci test-v8 test-v8-intl \

@@ -29,6 +29,8 @@
 #include "node_lttng.h"
 #endif
 
+#include "node_jsvmapi_internal.h"
+
 #include "ares.h"
 #include "async-wrap.h"
 #include "async-wrap-inl.h"
@@ -2398,7 +2400,7 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
   // Objects containing v14 or later modules will have registered themselves
   // on the pending list.  Activate all of them now.  At present, only one
   // module per object is supported.
-  node_module* const mp = modpending;
+  node_module* mp = modpending;
   modpending = nullptr;
 
   if (is_dlopen_error) {
@@ -2412,12 +2414,74 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
     return;
   }
 
+  // try loading with node 0.10 manner in case of node 0.10
+  struct node_module_old* mod;
+  char symbol[1024], *base, *pos;
+  int r;
+  if (mp == NULL) {
+    node::Utf8Value path(env->isolate(), args[1]);
+    base = *path;
+
+    /* Find the shared library filename within the full path. */
+#ifdef __POSIX__
+    pos = strrchr(base, '/');
+    if (pos != NULL) {
+      base = pos + 1;
+    }
+#else // Windows
+    for (;;) {
+      pos = strpbrk(base, "\\/:");
+      if (pos == NULL) {
+        break;
+      }
+      base = pos + 1;
+    }
+#endif
+
+    /* Strip the .node extension. */
+    pos = strrchr(base, '.');
+    if (pos != NULL) {
+      *pos = '\0';
+    }
+    /* Add the `_module` suffix to the extension name. */
+    r = snprintf(symbol, sizeof symbol, "%s_module", base);
+    if (r <= 0 || static_cast<size_t>(r) >= sizeof symbol) {
+      env->ThrowError("Out of memory.");
+    }
+
+    /* Replace dashes with underscores. When loading foo-bar.node,
+     * look for foo_bar_module, not foo-bar_module.
+     */
+    for (pos = symbol; *pos != '\0'; ++pos) {
+      if (*pos == '-') *pos = '_';
+    }
+
+    if (uv_dlsym(&lib, symbol, reinterpret_cast<void**>(&mod))) {
+      char errmsg[1024];
+      snprintf(errmsg, sizeof(errmsg), "Symbol %s not found.", symbol);
+      env->ThrowError(errmsg);
+      return;
+    }
+    mp = new struct node_module;
+    mp->nm_version = mod->version;
+    mp->nm_flags = 0;
+    mp->nm_filename = mod->filename;
+    mp->nm_register_func =
+        reinterpret_cast<node::addon_register_func>(mod->register_func);
+    mp->nm_context_register_func = NULL;
+    mp->nm_modname = mod->modname;
+  }
+
+
   if (mp == nullptr) {
     uv_dlclose(&lib);
     env->ThrowError("Module did not self-register.");
     return;
   }
-  if (mp->nm_version != NODE_MODULE_VERSION) {
+
+  bool isNapiModule = mp->nm_version == -1;
+
+  if (mp->nm_version != NODE_MODULE_VERSION && !isNapiModule) {
     char errmsg[1024];
     snprintf(errmsg,
              sizeof(errmsg),
@@ -2448,14 +2512,28 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
   Local<String> exports_string = env->exports_string();
   Local<Object> exports = module->Get(exports_string)->ToObject(env->isolate());
 
-  if (mp->nm_context_register_func != nullptr) {
-    mp->nm_context_register_func(exports, module, env->context(), mp->nm_priv);
-  } else if (mp->nm_register_func != nullptr) {
-    mp->nm_register_func(exports, module, mp->nm_priv);
+  if (isNapiModule) {
+    if (mp->nm_register_func != nullptr) {
+      reinterpret_cast<node::addon_abi_register_func>(mp->nm_register_func)(
+          v8impl::JsEnvFromV8Isolate(v8::Isolate::GetCurrent()),
+          v8impl::JsValueFromV8LocalValue(exports),
+          v8impl::JsValueFromV8LocalValue(module),
+          mp->nm_priv);
+    } else {
+      uv_dlclose(&lib);
+      env->ThrowError("Module has no declared entry point.");
+      return;
+    }
   } else {
-    uv_dlclose(&lib);
-    env->ThrowError("Module has no declared entry point.");
-    return;
+    if (mp->nm_context_register_func != nullptr) {
+      mp->nm_context_register_func(exports, module, env->context(), mp->nm_priv);
+    } else if (mp->nm_register_func != nullptr) {
+      mp->nm_register_func(exports, module, mp->nm_priv);
+    } else {
+      uv_dlclose(&lib);
+      env->ThrowError("Module has no declared entry point.");
+      return;
+    }
   }
 
   // Tell coverity that 'handle' should not be freed when we return.
@@ -2681,7 +2759,15 @@ static void LinkedBinding(const FunctionCallbackInfo<Value>& args) {
                                   env->context(),
                                   mod->nm_priv);
   } else if (mod->nm_register_func != nullptr) {
-    mod->nm_register_func(exports, module, mod->nm_priv);
+    if (mod->nm_version != -1) {
+      mod->nm_register_func(exports, module, mod->nm_priv);
+    } else {
+      reinterpret_cast<node::addon_abi_register_func>(mod->nm_register_func)(
+          v8impl::JsEnvFromV8Isolate(v8::Isolate::GetCurrent()),
+          v8impl::JsValueFromV8LocalValue(exports),
+          v8impl::JsValueFromV8LocalValue(module),
+          mod->nm_priv);
+    }
   } else {
     return env->ThrowError("Linked module has no declared entry point.");
   }

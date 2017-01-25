@@ -1,0 +1,775 @@
+﻿#ifndef SRC_NODE_API_HELPERS_H_
+#define SRC_NODE_API_HELPERS_H_
+
+////////////////////////////////////////////////////////////////////////////////
+// Nan-like Helpers
+////////////////////////////////////////////////////////////////////////////////
+// Must not have symbol exports to achieve clean C opaque API/ABI
+//
+// TODO(ianhall): This should all move into its own header file and perhaps be
+// optional since it contains a lot of inline code and brings in a lot of header
+// dependencies.
+////////////////////////////////////////////////////////////////////////////////
+#include "node_jsvmapi.h"
+#include "node_asyncapi.h"
+#include <limits.h>
+#include <string.h>
+#include <assert.h>
+
+#define NAPI_METHOD(name)                                                      \
+  void name(napi_env env, napi_callback_info info)
+#define NAPI_GETTER(name) NAPI_METHOD(name)
+#define NAPI_SETTER(name) NAPI_METHOD(name)
+
+#define NAPI_MODULE_INIT(name)                                                 \
+  void name(napi_env env, napi_value exports, napi_value module)
+
+#define NAPI_GETTER(name)                                                      \
+  void name(napi_env e, napi_propertyname property, napi_callback_info info)
+
+#define NAPI_SETTER(name)                                                      \
+  void name(napi_env e, napi_propertyname property, napi_value value,          \
+            napi_callback_info info)
+
+// This is taken from NAN and is the C++11 version.
+// TODO(ianhall): Support pre-C++11 compilation?
+#define NAPI_DISALLOW_ASSIGN(CLASS) void operator=(const CLASS&) = delete;
+#define NAPI_DISALLOW_COPY(CLASS) CLASS(const CLASS&) = delete;
+#define NAPI_DISALLOW_MOVE(CLASS)                                              \
+  CLASS(CLASS&) = delete;                                                      \
+  void operator=(CLASS&) = delete;
+
+#define NAPI_DISALLOW_ASSIGN_COPY_MOVE(CLASS)                                  \
+  NAPI_DISALLOW_ASSIGN(CLASS)                                                  \
+  NAPI_DISALLOW_COPY(CLASS)                                                    \
+  NAPI_DISALLOW_MOVE(CLASS)
+
+namespace Napi {
+  inline napi_value Value() {
+    napi_env env = napi_get_current_env();
+    return napi_new_value(env);
+  }
+
+
+  // Napi::New helpers
+  inline napi_value New() {
+    return napi_get_null(napi_get_current_env());
+  }
+  inline napi_value New(bool val) {
+    return napi_create_boolean(napi_get_current_env(), val);
+  }
+  inline napi_value New(int val) {
+    return napi_create_number(napi_get_current_env(), val);
+  }
+  inline napi_value New(double val) {
+    return napi_create_number(napi_get_current_env(), val);
+  }
+  inline napi_value New(const char* val) {
+    return napi_create_string(napi_get_current_env(), val);
+  }
+  inline napi_value New(const char* val, size_t len) {
+    return napi_create_string_with_length(napi_get_current_env(), val, len);
+  }
+  inline napi_value New(napi_persistent p) {
+    napi_env env = napi_get_current_env();
+    return napi_get_persistent_value(env, p);
+  }
+  inline napi_value NewSymbol(const char* val) {
+    return napi_create_symbol(napi_get_current_env(), val);
+  }
+  inline napi_value NewObject() {
+    return napi_create_object(napi_get_current_env());
+  }
+  inline napi_value NewArray() {
+    return napi_create_array(napi_get_current_env());
+  }
+  inline napi_value NewArray(int len) {
+    return napi_create_array_with_length(napi_get_current_env(), len);
+  }
+  inline napi_value NewFunction(napi_callback cb) {
+    napi_env env = napi_get_current_env();
+    return napi_create_function(env, cb, NULL);
+  }
+
+
+  inline napi_value Undefined() {
+    return napi_get_undefined_(napi_get_current_env());
+  }
+
+  inline napi_value Null() {
+    return napi_get_null(napi_get_current_env());
+  }
+
+  // Error Helpers
+  inline napi_value Error(const char* errmsg) {
+    napi_env env = napi_get_current_env();
+    return napi_create_error(env, napi_create_string(env, errmsg));
+  }
+  inline napi_value Error(napi_value errmsg) {
+    napi_env env = napi_get_current_env();
+    return napi_create_error(env, errmsg);
+  }
+
+  inline napi_value TypeError(const char* errmsg) {
+    napi_env env = napi_get_current_env();
+    return napi_create_type_error(env, napi_create_string(env, errmsg));
+  }
+  inline napi_value TypeError(napi_value errmsg) {
+    napi_env env = napi_get_current_env();
+    return napi_create_type_error(env, errmsg);
+  }
+
+  // Error Helpers
+  inline void ThrowError(char* errmsg) {
+    napi_env env = napi_get_current_env();
+    napi_throw_error(env, errmsg);
+  }
+  inline void ThrowError(napi_value errmsg) {
+    napi_env env = napi_get_current_env();
+    napi_throw(env, napi_create_error(env, errmsg));
+  }
+  inline void ThrowTypeError(char* errmsg) {
+    napi_env env = napi_get_current_env();
+    napi_throw_type_error(env, errmsg);
+  }
+  inline void ThrowTypeError(napi_value errmsg) {
+    napi_env env = napi_get_current_env();
+    napi_throw(env, napi_create_type_error(env, errmsg));
+  }
+
+  // Get helpers
+  inline napi_value GetPropertyNames(napi_value obj) {
+    napi_env env = napi_get_current_env();
+    return napi_get_propertynames(env, obj);
+  }
+
+  inline napi_value Get(napi_value obj, napi_propertyname key ) {
+    napi_env env = napi_get_current_env();
+    return napi_get_property(env, obj, key);
+  }
+  inline napi_value Get(napi_value obj, const char* name) {
+    napi_env env = napi_get_current_env();
+    napi_propertyname key = napi_property_name(env, name);
+    return napi_get_property(env, obj, key);
+  }
+  inline napi_value Get(napi_value obj, napi_value name) {
+    napi_env env = napi_get_current_env();
+    napi_propertyname key = reinterpret_cast<napi_propertyname>(name);
+    return napi_get_property(env, obj, key);
+  }
+  inline napi_value Get(napi_value arr, uint32_t i ) {
+    napi_env env = napi_get_current_env();
+    return napi_get_element(env, arr, i);
+  }
+
+  // Set  helpers
+  inline void Set(napi_value obj, napi_propertyname key, napi_value val) {
+    napi_env env = napi_get_current_env();
+    napi_set_property(env, obj, key, val);
+  }
+  inline void Set(napi_value obj, const char* name, napi_value val) {
+    napi_env env = napi_get_current_env();
+    napi_propertyname key = napi_property_name(env, name);
+    napi_set_property(env, obj, key, val);
+  }
+  inline void Set(napi_value obj, napi_value name, napi_value val) {
+    napi_env env = napi_get_current_env();
+    napi_propertyname key = reinterpret_cast<napi_propertyname>(name);
+    napi_set_property(env, obj, key, val);
+  }
+  inline void Set(napi_value arr, uint32_t i, napi_value val) {
+    napi_env env = napi_get_current_env();
+    napi_set_element(env, arr, i, val);
+  }
+
+  // Type check helpers
+  inline bool IsEmpty(napi_value v) {
+    napi_env env = napi_get_current_env();
+    return napi_is_empty(env, v);
+  }
+  inline bool IsNumber(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_number;
+  }
+  inline bool IsInt32(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_is_int32(env, val);
+  }
+  inline bool IsString(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_string;
+  }
+  inline bool IsFunction(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_function;
+  }
+  inline bool IsObject(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_object;
+  }
+  inline bool IsArray(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_array;
+  }
+  inline bool IsBoolean(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_boolean;
+  }
+  inline bool IsUndefined(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_undefined;
+  }
+  inline bool IsSymbol(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_symbol;
+  }
+  inline bool IsRegExp(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_regexp;
+  }
+  inline bool IsDate(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_date;
+  }
+  inline bool IsNull(napi_value val) {
+    napi_env env = napi_get_current_env();
+    return napi_get_type_of_value(env, val) == napi_null;
+  }
+
+  inline bool HasInstance(napi_value tpl, napi_value obj) {
+    napi_env env = napi_get_current_env();
+    return napi_instanceof(env, obj, tpl);
+  }
+
+  inline napi_value CopyBuffer(const char* buf, uint32_t size) {
+    napi_env env = napi_get_current_env();
+    return napi_buffer_copy(env, buf, size);
+  }
+
+  inline napi_value StringConcat(napi_value str1, napi_value str2) {
+    napi_env env = napi_get_current_env();
+    return napi_string_concat(env, str1, str2);
+  }
+
+  inline napi_value MakeCallback(
+      napi_value target,
+      napi_value func,
+      int argc,
+      napi_value* argv
+  ) {
+    napi_env env = napi_get_current_env();
+    return napi_make_callback(env, target, func, argc, argv);
+  }
+
+  // Length helpers
+  inline int Length(napi_value val) {
+    napi_env env = napi_get_current_env();
+    assert(napi_get_type_of_value(env, val) == napi_array);
+    return napi_get_array_length(env, val);
+  }
+
+  inline int Length(napi_callback_info info) {
+    napi_env env = napi_get_current_env();
+    return napi_get_cb_args_length(env, info);
+  }
+
+  // Conversion helpers
+  inline void To(napi_value v, int32_t& o) {
+    napi_env env = napi_get_current_env();
+    o = napi_get_value_int32(env, v);
+  }
+
+  inline void To(napi_value v, uint32_t& o) {
+    napi_env env = napi_get_current_env();
+    o = napi_get_value_uint32(env, v);
+  }
+
+  inline void To(napi_value v, int64_t& o) {
+    napi_env env = napi_get_current_env();
+    o = napi_get_value_int64(env, v);
+  }
+
+  inline void To(napi_value v, bool& o) {
+    napi_env env = napi_get_current_env();
+    o = napi_get_value_bool(env, v);
+  }
+
+  inline void To(napi_value v, double& o) {
+    napi_env env = napi_get_current_env();
+    o = napi_get_number_from_value (env, v);
+  }
+
+  template<typename T>
+  inline T To(napi_value v) {
+    T ret;
+    To(v, ret);
+    return ret;
+  }
+
+  inline napi_value ToString(napi_value v) {
+    napi_env env = napi_get_current_env();
+    return napi_coerce_to_string(env, v);
+  }
+  inline napi_value ToObject(napi_value v) {
+    napi_env env = napi_get_current_env();
+    return napi_coerce_to_object(env, v);
+  }
+
+  inline bool Equals(napi_value lhs, napi_value rhs) {
+    napi_env env = napi_get_current_env();
+    return napi_strict_equals(env, lhs, rhs);
+  }
+
+  inline napi_value* GetArguments(napi_callback_info info) {
+    napi_env env = napi_get_current_env();
+    int len = napi_get_cb_args_length(env, info);
+    napi_value* args = (napi_value*) malloc(len * sizeof(napi_value));
+    napi_get_cb_args(env, info, args, len);
+    return args;
+  }
+
+  // RAII HandleScope helpers
+  // Mirror Nan versions for easy conversion
+  // Ensure scopes are closed in the correct order on the stack
+  class HandleScope {
+   public:
+    HandleScope() {
+      env = napi_get_current_env();
+      scope = napi_open_handle_scope(env);
+    }
+    explicit HandleScope(napi_env e) : env(e) {
+      scope = napi_open_handle_scope(env);
+    }
+    ~HandleScope() {
+      napi_close_handle_scope(env, scope);
+    }
+
+   private:
+    napi_env env;
+    napi_handle_scope scope;
+  };
+
+  class EscapableHandleScope {
+   public:
+    EscapableHandleScope() {
+      env = napi_get_current_env();
+      scope = napi_open_escapable_handle_scope(env);
+    }
+    explicit EscapableHandleScope(napi_env e) : env(e) {
+      scope = napi_open_escapable_handle_scope(e);
+    }
+    ~EscapableHandleScope() {
+      napi_close_escapable_handle_scope(env, scope);
+    }
+
+    napi_value Escape(napi_value escapee) {
+      return napi_escape_handle(env, scope, escapee);
+    }
+
+   private:
+    napi_env env;
+    napi_escapable_handle_scope scope;
+  };
+
+  class Utf8String {
+   public:
+    inline explicit Utf8String(napi_value from) :
+        length_(0), str_(str_st_) {
+      if (from != NULL) {
+        napi_env env = napi_get_current_env();
+        napi_value string = napi_coerce_to_string(env, from);
+        if (string != NULL) {
+          size_t len = 3 * napi_get_string_length(env, string) + 1;
+          assert(len <= INT_MAX);
+          if (len > sizeof(str_st_)) {
+            str_ = new char[len];
+            assert(str_ != 0);
+          }
+          length_ = napi_get_string_utf8(env, string, str_,
+                                         static_cast<int>(len));
+          str_[length_] = '\0';
+        }
+      }
+    }
+
+    inline int length() const {
+      return length_;
+    }
+
+    inline char* operator*() { return str_; }
+    inline const char* operator*() const { return str_; }
+
+    inline ~Utf8String() {
+      if (str_ != str_st_) {
+        delete [] str_;
+      }
+    }
+
+   private:
+    NAPI_DISALLOW_ASSIGN_COPY_MOVE(Utf8String)
+
+    int length_;
+    char *str_;
+    char str_st_[1024];
+  };
+
+  class ObjectWrap {
+   public:
+    ObjectWrap() {
+      napi_env env = napi_get_current_env();
+      handle_ = napi_create_persistent(env, nullptr);
+      refs_ = 0;
+    }
+
+    virtual ~ObjectWrap() {
+      napi_env env = napi_get_current_env();
+      napi_release_persistent(env, persistent());
+    }
+
+    template <class T>
+    static inline T* Unwrap(napi_value object) {
+      napi_env env = napi_get_current_env();
+      assert(!napi_is_empty(env, object));
+      assert(napi_get_internal_field_count(env, object) > 0);
+      void* ptr = napi_get_internal_field_pointer(env, object, 0);
+      ObjectWrap* wrap = static_cast<ObjectWrap*>(ptr);
+      return static_cast<T*>(wrap);
+    }
+
+    inline napi_value handle() {
+      napi_env env = napi_get_current_env();
+      return napi_get_persistent_value(env, persistent());
+    }
+
+    inline napi_persistent persistent() {
+      return handle_;
+    }
+
+   protected:
+    inline void Wrap(napi_value object) {
+      napi_env env = napi_get_current_env();
+      assert(napi_is_persistent_empty(env, persistent()));
+      assert(napi_get_internal_field_count(env, object) > 0);
+      napi_set_internal_field_pointer(env, object, 0, this);
+      napi_release_persistent(env, persistent());
+      handle_ = napi_create_persistent(env, object);
+      napi_persistent_make_weak(env, persistent(), this);
+    }
+
+    /* Ref() marks the object as being attached to an event loop.
+     * Refed objects will not be garbage collected, even if
+     * all references are lost.
+     */
+    virtual void Ref() {
+      napi_env env = napi_get_current_env();
+      assert(!napi_is_persistent_empty(env, persistent()));
+      napi_persistent_clear_weak(env, persistent());
+      refs_++;
+    }
+
+    /* Unref() marks an object as detached from the event loop.  This is its
+     * default state.  When an object with a "weak" reference changes from
+     * attached to detached state it will be freed. Be careful not to access
+     * the object after making this call as it might be gone!
+     * (A "weak reference" means an object that only has a
+     * persistent handle.)
+     *
+     * DO NOT CALL THIS FROM DESTRUCTOR
+     */
+    virtual void Unref() {
+      napi_env env = napi_get_current_env();
+      assert(!napi_is_persistent_empty(env, persistent()));
+      assert(refs_ > 0);
+      if (--refs_ == 0)
+        napi_persistent_make_weak(env, persistent(), this);
+    }
+
+    int refs_;
+
+   private:
+    napi_persistent handle_;
+};
+
+
+  // TODO(ianhall): This class uses napi_get_current_env() extensively
+  // does that make sense? will this behave correctly when passed around
+  // workers?  Is there a good reason to have napi_env?
+  // Perhaps the C++ layer shields the user from napi_env and behaves
+  // like Nan, always using the current one?
+  class Callback {
+   public:
+    Callback() {
+      napi_env env = napi_get_current_env();
+      HandleScope scope(env);
+      napi_value obj = napi_create_object(env);
+      handle = napi_create_persistent(env, obj);
+    }
+
+    explicit Callback(napi_value fn) {
+      napi_env env = napi_get_current_env();
+      HandleScope scope(env);
+      napi_value obj = napi_create_object(env);
+      handle = napi_create_persistent(env, obj);
+      SetFunction(fn);
+    }
+
+    ~Callback() {
+      if (handle == NULL) {
+        return;
+      }
+      napi_release_persistent(napi_get_current_env(), handle);
+    }
+
+    bool operator==(const Callback &other) const {
+      HandleScope scope;
+      napi_env env = napi_get_current_env();
+      napi_value a = napi_get_element(env,
+                                      napi_get_persistent_value(env, handle),
+                                      kCallbackIndex);
+      napi_value b = napi_get_element(env,
+                                      napi_get_persistent_value(env,
+                                      other.handle), kCallbackIndex);
+      return napi_strict_equals(env, a, b);
+    }
+
+    bool operator!=(const Callback &other) const {
+      return !this->operator==(other);
+    }
+
+    inline
+    napi_value operator*() const { return this->GetFunction(); }
+
+    inline napi_value operator()(
+        napi_value target,
+        int argc = 0,
+        napi_value argv[] = 0) const {
+      return this->Call(target, argc, argv);
+    }
+
+    inline napi_value operator()(
+        int argc = 0,
+        napi_value argv[] = 0) const {
+      return this->Call(argc, argv);
+    }
+
+    inline bool IsFunction() {
+      HandleScope scope;
+      napi_env env = napi_get_current_env();
+      napi_value fn =
+          napi_get_element(env,
+              napi_get_persistent_value(env, handle), kCallbackIndex);
+      return napi_function == napi_get_type_of_value(env, fn);
+    }
+
+    inline void SetFunction(napi_value fn) {
+      HandleScope scope;
+      napi_env env = napi_get_current_env();
+      napi_set_element(env, napi_get_persistent_value(env, handle),
+                       kCallbackIndex, fn);
+    }
+
+    inline napi_value GetFunction() const {
+      EscapableHandleScope scope;
+      napi_env env = napi_get_current_env();
+      return scope.Escape(
+          napi_get_element(env, napi_get_persistent_value(env, handle),
+                           kCallbackIndex));
+    }
+
+    inline bool IsEmpty() const {
+      HandleScope scope;
+      napi_env env = napi_get_current_env();
+      napi_value fn =
+          napi_get_element(env,
+              napi_get_persistent_value(env, handle), kCallbackIndex);
+      return napi_undefined == napi_get_type_of_value(env, fn);
+    }
+
+    inline napi_value
+    Call(napi_value target,
+        int argc,
+        napi_value argv[]) const {
+      return Call_(target, argc, argv);
+    }
+
+    inline napi_value
+    Call(int argc, napi_value argv[]) const {
+      napi_env env = napi_get_current_env();
+      return Call_(napi_get_global_scope(env), argc, argv);
+    }
+
+   private:
+    NAPI_DISALLOW_ASSIGN_COPY_MOVE(Callback)
+    napi_persistent handle;
+    static const uint32_t kCallbackIndex = 0;
+
+    napi_value Call_(napi_value target,
+                   int argc,
+                   napi_value argv[]) const {
+      EscapableHandleScope scope;
+      napi_env env = napi_get_current_env();
+
+      napi_value callback =
+          napi_get_element(env, napi_get_persistent_value(env, handle),
+                           kCallbackIndex);
+      return scope.Escape(napi_make_callback(
+        env,
+        target,
+        callback,
+        argc,
+        argv));
+    }
+  };
+
+
+  // TODO(ianhall): This class uses napi_get_current_env() extensively
+  // See comment above on class Callback
+  /* abstract */ class AsyncWorker {
+   public:
+    explicit AsyncWorker(Callback *callback_)
+        : callback(callback_), errmsg_(NULL) {
+      request = napi_create_work();
+      napi_env env = napi_get_current_env();
+
+      HandleScope scope;
+      napi_value obj = napi_create_object(env);
+      persistentHandle = napi_create_persistent(env, obj);
+    }
+
+    virtual ~AsyncWorker() {
+      HandleScope scope;
+
+      if (persistentHandle != NULL) {
+        napi_env env = napi_get_current_env();
+        napi_release_persistent(env, persistentHandle);
+        persistentHandle = NULL;
+      }
+      delete callback;
+      delete[] errmsg_;
+
+      napi_delete_work(request);
+    }
+
+    virtual void WorkComplete() {
+      HandleScope scope;
+
+      if (errmsg_ == NULL)
+        HandleOKCallback();
+      else
+        HandleErrorCallback();
+      delete callback;
+      callback = NULL;
+    }
+
+    inline void SaveToPersistent(
+        const char *key, napi_value value) {
+      HandleScope scope;
+      napi_env env = napi_get_current_env();
+      napi_propertyname pnKey = napi_property_name(env, key);
+      napi_set_property(env, napi_get_persistent_value(env, persistentHandle),
+                        pnKey, value);
+    }
+
+    inline void SaveToPersistent(
+        napi_propertyname key, napi_value value) {
+      HandleScope scope;
+      napi_env env = napi_get_current_env();
+      napi_set_property(env, napi_get_persistent_value(env, persistentHandle),
+                        key, value);
+    }
+
+    inline void SaveToPersistent(
+        uint32_t index, napi_value value) {
+      HandleScope scope;
+      napi_env env = napi_get_current_env();
+      napi_set_element(env, napi_get_persistent_value(env, persistentHandle),
+                       index, value);
+    }
+
+    inline napi_value GetFromPersistent(const char *key) const {
+      EscapableHandleScope scope;
+      napi_env env = napi_get_current_env();
+      napi_propertyname pnKey = napi_property_name(env, key);
+      return scope.Escape(
+          napi_get_property(env,
+              napi_get_persistent_value(env, persistentHandle), pnKey));
+    }
+
+    inline napi_value
+    GetFromPersistent(napi_propertyname key) const {
+      EscapableHandleScope scope;
+      napi_env env = napi_get_current_env();
+      return scope.Escape(
+          napi_get_property(env,
+              napi_get_persistent_value(env, persistentHandle), key));
+    }
+
+    inline napi_value GetFromPersistent(uint32_t index) const {
+      EscapableHandleScope scope;
+      napi_env env = napi_get_current_env();
+      return scope.Escape(
+          napi_get_element(env,
+              napi_get_persistent_value(env, persistentHandle), index));
+    }
+
+    virtual void Execute() = 0;
+
+    napi_work request;
+
+    static void CallExecute(void* this_pointer){
+      AsyncWorker* self = static_cast<AsyncWorker*>(this_pointer);
+      self->Execute();
+    }
+
+    static void CallWorkComplete(void* this_pointer) {
+      AsyncWorker* self = static_cast<AsyncWorker*>(this_pointer);
+      self->WorkComplete();
+    }
+
+   protected:
+    napi_persistent persistentHandle;
+    Callback *callback;
+
+    virtual void HandleOKCallback() {
+      callback->Call(0, NULL);
+    }
+
+    virtual void HandleErrorCallback() {
+      HandleScope scope;
+      napi_env env = napi_get_current_env();
+
+      napi_value argv[] = {
+        napi_create_error(env, napi_create_string(env, ErrorMessage()))
+      };
+      callback->Call(1, argv);
+    }
+
+    void SetErrorMessage(const char *msg) {
+      delete[] errmsg_;
+
+      size_t size = strlen(msg) + 1;
+      errmsg_ = new char[size];
+      memcpy(errmsg_, msg, size);
+    }
+
+    const char* ErrorMessage() const {
+      return errmsg_;
+    }
+
+   private:
+    NAPI_DISALLOW_ASSIGN_COPY_MOVE(AsyncWorker)
+    char *errmsg_;
+  };
+
+  inline void AsyncQueueWorker(AsyncWorker* worker) {
+    napi_work req = worker->request;
+    napi_work_set_data(req, static_cast<void*>(worker));
+    napi_work_set_execute(req, &AsyncWorker::CallExecute);
+    napi_work_set_complete(req, &AsyncWorker::CallWorkComplete);
+    napi_work_queue_worker(req);
+  }
+
+} // namespace Napi
+
+
+#endif // SRC_NODE_API_HELPERS_H_

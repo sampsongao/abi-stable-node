@@ -41,6 +41,7 @@
 
 #include "v8.h"  // NOLINT(build/include_order)
 #include "node_version.h"  // NODE_MODULE_VERSION
+#include "node_jsvmapi.h"
 #include "tracing/trace_event.h"
 
 #define NODE_MAKE_VERSION(major, minor, patch)                                \
@@ -391,6 +392,14 @@ typedef void (*addon_context_register_func)(
 
 #define NM_F_BUILTIN 0x01
 #define NM_F_LINKED  0x02
+
+struct node_module_old {
+  int version;
+  void* dso_handle;
+  const char* filename;
+  node::addon_register_func register_func;
+  const char* modname;
+};
 
 struct node_module {
   int nm_version;
